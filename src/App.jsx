@@ -47,76 +47,73 @@ export default function App() {
     }
   }, []);
 
-/* ---------------- 倒計時 ---------------- */
-useEffect(() => {
-  if (!isRunning) return;                 // 沒在跑就不設 interval
+/* ---------- 單次通知 ---------- */
+  async function notifyUser() {
+    const vibrate = () => navigator.vibrate?.(200);
+    const blinkTitle = () => {
+      const orig = document.title;
+      let flip = false;
+      const id = setInterval(() => {
+        document.title = flip ? "⏰ 番茄鐘結束！" : orig;
+        flip = !flip;
+      }, 1000);
+      setTimeout(() => {
+        clearInterval(id);
+        document.title = orig;
+      }, 5000);
+    };
 
-  timerRef.current = setInterval(() => {
-    setSeconds((prev) => {
-      if (prev > 1) return prev - 1;      // 繼續倒數
-
-      /* ======== 時間到：收尾 ======== */
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-      setIsRunning(false);
-      safePause();                        // 停止音樂
-      setPomodoroCount((c) => c + 1);     // 完成次數 +1
-
-      /* ======== 通知邏輯 ======== */
-      const vibrate = () => navigator.vibrate?.(200);
-      const sendDesktop = () =>
+    let sent = false;
+    if (typeof Notification !== "undefined") {
+      if (Notification.permission === "granted") {
         new Notification("番茄鐘結束 ⏰", { body: "請休息五分鐘 🌿" });
-
-      let desktopSent = false;
-
-      // 1️⃣ 嘗試桌面通知
-      if (typeof Notification !== "undefined") {
-        if (Notification.permission === "granted") {
-          sendDesktop();
-          desktopSent = true;
-        } else if (Notification.permission === "default") {
-          Notification.requestPermission().then((p) => {
-            if (p === "granted") {
-              sendDesktop();
-              desktopSent = true;
-            }
-          });
+        sent = true;
+      } else if (Notification.permission === "default") {
+        const p = await Notification.requestPermission();
+        if (p === "granted") {
+          new Notification("番茄鐘結束 ⏰", { body: "請休息五分鐘 🌿" });
+          sent = true;
         }
       }
+    }
 
-      // 2️⃣ 備援：被封鎖或不支援
-      if (!desktopSent) {
-        alert("番茄鐘結束 ⏰\n請休息五分鐘 🌿");    // 阻擋式彈窗
+    if (!sent) {
+      alert("番茄鐘結束 ⏰\n請休息五分鐘 🌿");
+      try { new Audio("/ding.mp3").play(); } catch {}
+      blinkTitle();
+    }
 
-        try {                                     // 音效（放 public/ding.mp3）
-          new Audio("/ding.mp3").play();
-        } catch {}
+    vibrate();
+    setTimeout(() => (notifyLock.current = false), 1000);
+  }
 
-        // 頁籤標題閃爍 5 秒
-        const origTitle = document.title;
-        let flip = false;
-        const blinkId = setInterval(() => {
-          document.title = flip ? "⏰ 番茄鐘結束！" : origTitle;
-          flip = !flip;
-        }, 1000);
-        setTimeout(() => {
-          clearInterval(blinkId);
-          document.title = origTitle;
-        }, 5000);
-      }
+  /* ---------------- 倒計時 ---------------- */
+  useEffect(() => {
+    if (!isRunning) return;
 
-      // 3️⃣ 震動（行動裝置）
-      vibrate();
+    timerRef.current = setInterval(() => {
+      setSeconds((prev) => {
+        if (prev > 1) return prev - 1;
 
-      /* 回傳下一輪秒數，重啟倒計時 */
-      return workMinutes * 60 + workSeconds;
-    });
-  }, 1000);
+        // ===== 時間到 =====
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+        setIsRunning(false);
+        safePause();
+        setPomodoroCount((c) => c + 1);
 
-  // 清理 interval
-  return () => clearInterval(timerRef.current);
-}, [isRunning, workMinutes, workSeconds]);
+        if (!notifyLock.current) {
+          notifyLock.current = true;
+          notifyUser();
+        }
 
+        // 重新倒下一輪
+        return workMinutes * 60 + workSeconds;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerRef.current);
+  }, [isRunning, workMinutes, workSeconds]);
 
   /* ----------- 解析 YouTube 網址 ----------- */
   const extractVideoOrPlaylist = (url) => {
